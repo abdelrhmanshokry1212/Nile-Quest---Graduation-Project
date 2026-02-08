@@ -65,15 +65,19 @@ class AICandidateGenerator:
         cache_valid = False
         if os.path.exists(self.cache_file):
             print("Found embedding cache.")
-            with open(self.cache_file, 'rb') as f:
-                data = pickle.load(f)
-                # Simple version check: compare number of rows
-                if len(data) == len(self.df):
-                    self.embeddings = data
-                    cache_valid = True
-                    print("Cache loaded successfully.")
-                else:
-                    print("Cache outdated (row count mismatch). Re-computing...")
+            try:
+                with open(self.cache_file, 'rb') as f:
+                    data = pickle.load(f)
+                    # Simple version check: compare number of rows
+                    if len(data) == len(self.df):
+                        self.embeddings = data
+                        cache_valid = True
+                        print("Cache loaded successfully.")
+                    else:
+                        print("Cache outdated (row count mismatch). Re-computing...")
+            except (EOFError, pickle.UnpicklingError, Exception) as e:
+                print(f"Cache corrupted or unreadable ({e}). Re-computing...")
+                cache_valid = False
         
         if not cache_valid:
             print("Computing Embeddings (this happens once)...")
@@ -150,7 +154,7 @@ class AICandidateGenerator:
             # Ensure valid coords
             valid_geo_df = candidates.dropna(subset=['Latitude', 'Longitude'])
             if not valid_geo_df.empty:
-                dists = haversine_np(center_lat, center_lon, valid_geo_df['Longitude'].values, valid_geo_df['Latitude'].values)
+                dists = haversine_np(center_lon, center_lat, valid_geo_df['Longitude'].values, valid_geo_df['Latitude'].values)
                 valid_geo_df['Distance_km'] = dists
                 # Filter
                 candidates = valid_geo_df[valid_geo_df['Distance_km'] <= radius]
