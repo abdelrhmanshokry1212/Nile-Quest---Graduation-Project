@@ -1,0 +1,145 @@
+
+from recommendation_model.tourist_recommendation_system import TouristRecommendationSystem, UserProfile
+
+def main():
+    print("=== AI Tourist Recommendation System ===")
+    
+    # 1. Initialize System
+    try:
+        sys = TouristRecommendationSystem("Cairo_Giza_Final_Verified_POIs.xlsx")
+    except Exception as e:
+        print(f"Failed to initialize: {e}")
+        return
+
+
+    # 2. Define User Profile (Interactive Input)
+    print("\n--- Enter Your Preferences ---")
+    
+    # Duration
+    while True:
+        try:
+            days = int(input("How many days is your trip? (e.g., 3): ").strip() or "1")
+            if days > 0: break
+            print("Please enter a positive number.")
+        except ValueError:
+            print("Invalid number.")
+
+    # Budget
+    while True:
+        try:
+            budget_input = input("What is your DAILY budget in EGP? (e.g., 1000): ").strip()
+            budget_daily = float(budget_input) if budget_input else 1000.0
+            break
+        except ValueError:
+            print("Invalid amount. Please enter a number.")
+
+    # Interests
+    print("\nSelect your top interests BY PRIORITY (1st is most important).")
+    available_interests = ["History", "Culture", "Food", "Nature", "Shopping", "Entertainment", "Religious"]
+    
+    print("Available options:")
+    for i, opt in enumerate(available_interests, 1):
+        print(f" {i}. {opt}")
+        
+    user_interests = {}
+    
+    # Dynamic Priority Input Loop
+    print("\nSelect your top interests BY PRIORITY.")
+    print("1st choice is most important, 2nd is next, etc.")
+    print("Press Enter without typing to finish.")
+    
+    current_priority = 1
+    max_weight = 1.0
+    
+    while True:
+        prompt = f"\n{current_priority}. What is your next interest? "
+        if current_priority == 1:
+            prompt = "\n1. What is your MAIN interest? "
+            
+        choice = input(prompt + "(Enter name): ").strip().title()
+        
+        if not choice:
+            if current_priority == 1:
+                 print("   Please enter at least one interest.")
+                 continue
+            else:
+                 break # User finished
+                 
+        if choice in available_interests:
+            if choice not in user_interests:
+                # Assign weight: 1.0, 0.9, 0.8 ... min 0.1
+                weight = max(0.1, max_weight - (current_priority - 1) * 0.1)
+                user_interests[choice] = weight
+                current_priority += 1
+            else:
+                print(f"   '{choice}' is already selected.")
+        else:
+            print(f"   Please choose from the list above: {', '.join(available_interests)}")
+
+    # Custom interest (Added as the next priority)
+    custom = input("\nAny specific topic not listed? (e.g. 'Pharaonic'): ").strip()
+    if custom:
+        weight = max(0.1, max_weight - (current_priority - 1) * 0.1)
+        user_interests[custom] = weight # Add to the tail of priorities
+
+    if not user_interests:
+        print("No specific interests provided. We will recommend popular attractions.")
+    
+    # Pace (Removed as per feedback, defaulting to moderate/dynamic)
+    pace = "moderate" 
+
+    
+    user = UserProfile(
+        interests=user_interests,
+        budget_daily=budget_daily,
+        budget_total=budget_daily * days * 1.5, # Estimate buffer
+        duration_days=days,
+        pace=pace,
+        start_time="09:00",
+        end_time="18:00", # Default 6 PM
+        geo_center=(30.0444, 31.2357), # Default Downtown Cairo
+        indoor_preference="neutral"
+    )
+
+    print(f"\nUser Profile:")
+    print(f"- Interests: {', '.join([f'{k}({v})' for k,v in user.interests.items()])}")
+    print(f"- Budget: {user.budget_daily} EGP/day")
+    print(f"- Duration: {user.duration_days} days")
+    
+    # 3. Generate Itinerary
+    print("\nGenerating Itinerary...")
+    itinerary = sys.generate_itinerary(user)
+    
+    # 4. Display Results
+    print("\n" + "="*60)
+    print("                  YOUR PERSONALIZED ITINERARY")
+    print("="*60)
+    
+    total_trip_cost = 0
+    
+    for day in sorted(itinerary.keys()):
+        events = itinerary[day]
+        print(f"\n[ DAY {day} ]")
+        if not events:
+            print("  (No activities scheduled for this day - constraints too strict?)")
+            continue
+            
+        day_cost = 0
+        for event in events:
+            poi = event['poi']
+            print(f"  {event['start_time']} - {event['end_time']} : {poi.name}")
+            print(f"    Category: {poi.category} | {poi.subcategory}")
+            print(f"    Cost: {poi.cost} EGP | Duration: {poi.duration_hours}h")
+            print(f"    Why: {event['reason']}")
+            day_cost += poi.cost
+        
+        print(f"  --> Daily Total: {day_cost} EGP")
+        total_trip_cost += day_cost
+        print("-" * 40)
+        
+    print("="*60)
+    print(f"TOTAL ESTIMATED TRIP COST: {total_trip_cost} EGP")
+    print("="*60)
+
+if __name__ == "__main__":
+    main()

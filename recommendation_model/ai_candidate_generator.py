@@ -2,18 +2,18 @@ import pandas as pd
 import numpy as np
 import os
 import pickle
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from sklearn.metrics.pairwise import cosine_similarity
 import re
 
 class AICandidateGenerator:
-    def __init__(self, poi_file="Data/Cairo_Giza_500_POIs.xlsx", model_name='all-MiniLM-L6-v2'):
+    def __init__(self, poi_file="Cairo_Giza_Final_Verified_POIs.xlsx", model_name='all-MiniLM-L6-v2'):
         self.poi_file = poi_file
         self.model_name = model_name
         self.df = None
         self.embeddings = None
         self.model = None
-        self.cache_file = "poi_embeddings.pkl"
+        self.cache_file = os.path.join(os.path.dirname(__file__), "poi_embeddings.pkl")
         
         self.preferences = {
             "group_dynamics": {},
@@ -56,10 +56,17 @@ class AICandidateGenerator:
                 self.df['Longitude'] = lat_lon.apply(lambda x: x[1])
 
         self.df['Entry cost (EGP)'] = pd.to_numeric(self.df['Entry cost (EGP)'], errors='coerce').fillna(0)
+        
+        # FORCE FOOD COST TO 0
+        if 'Category' in self.df.columns:
+             self.df.loc[self.df['Category'].astype(str).str.lower() == 'food', 'Entry cost (EGP)'] = 0
 
     def load_model_and_embeddings(self):
         print("Loading AI Model (SentenceTransformer)...")
         self.model = SentenceTransformer(self.model_name)
+        # Load Cross-Encoder for Re-Ranking
+        print("Loading Cross-Encoder (ms-marco-MiniLM-L-6-v2)...")
+        self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
         
         # Check cache validity
         cache_valid = False
@@ -118,7 +125,113 @@ class AICandidateGenerator:
             else:
                  print("Location not found in database, skipping geo-filter.")
 
-    # --- ALGORITHMIC ENGINE ---
+    # --- API FOR MAIN SYSTEM ---
+    def generate_candidates_for_user(self, user_profile, top_k=50):
+        """
+        Generates candidates based on a UserProfile object from the main system.
+        """
+        # 1. Construct Semantic Query
+        # Group interests by priority buckets for cleaner sentences
+        if hasattr(user_profile, 'interests') and user_profile.interests:
+            sorted_interests = sorted(user_profile.interests.items(), key=lambda x: x[1], reverse=True)
+            
+            primary = []   # 1.0 - 0.9
+            secondary = [] # 0.8 - 0.6
+            tertiary = []  # 0.5 - ...
+            
+            for interest, weight in sorted_interests:
+                if weight >= 0.9:
+                    primary.append(interest)
+                elif weight >= 0.6:
+                    secondary.append(interest)
+                else:
+                    tertiary.append(interest)
+            
+            query_parts = []
+            if primary:
+                query_parts.append(f"I primarily want to visit {', '.join(primary)} places")
+            if secondary:
+                query_parts.append(f"I also really love {', '.join(secondary)}")
+            if tertiary:
+                query_parts.append(f"I am interested in {', '.join(tertiary)}")
+            
+            query = ". ".join(query_parts)
+        else:
+             query = "Popular tourist attractions in Cairo and Giza"
+
+        # 2. Semantic Search
+        print(f"AI Semantic Query: '{query}'")
+        query_embedding = self.model.encode([query])
+        similarities = cosine_similarity(query_embedding, self.embeddings)[0]
+        self.df['Semantic_Score'] = similarities
+        
+        # 3. Filter & Rank
+        candidates = self.df.copy()
+        
+        # Budget Filter
+        # Access budget_daily safely
+        budget_limit = getattr(user_profile, 'budget_daily', 10000)
+        # Assuming we want individual items to be affordable within the daily budget
+        # Let's say item cost shouldn't exceed 80% of daily budget? 
+        # Or just filtering out insanely expensive things.
+        # Actually, let's just stick to the CandidateGenerator logic:
+        candidates = candidates[candidates['Entry cost (EGP)'] <= budget_limit]
+
+        # Geo Filter (if center provided)
+        geo_center = getattr(user_profile, 'geo_center', None)
+        geo_radius = getattr(user_profile, 'geo_radius_km', 20.0)
+        
+        if geo_center:
+            center_lat, center_lon = geo_center
+            
+            def haversine_np(lon1, lat1, lon2, lat2):
+                lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
+                dlon = lon2 - lon1
+                dlat = lat2 - lat1
+                a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.0)**2
+                c = 2 * np.arcsin(np.sqrt(a))
+                km = 6367 * c
+                return km
+
+            # Ensure valid coords
+            valid_geo_df = candidates.dropna(subset=['Latitude', 'Longitude'])
+            if not valid_geo_df.empty:
+                dists = haversine_np(center_lon, center_lat, valid_geo_df['Longitude'].values, valid_geo_df['Latitude'].values)
+                # Assign to original index to keep alignment
+                candidates.loc[valid_geo_df.index, 'Distance_km'] = dists
+                # Filter
+                candidates = candidates[candidates['Distance_km'] <= geo_radius]
+        
+        # --- RE-RANKING STEP ---
+        # 1. Take top N candidates from the fast Bi-Encoder model
+        #    (We take slightly more than top_k to allow re-ordering)
+        top_candidates = candidates.sort_values(by='Semantic_Score', ascending=False).head(top_k * 2)
+        
+        if not top_candidates.empty:
+            print(f"Re-ranking top {len(top_candidates)} candidates with Cross-Encoder...")
+            
+            # 2. Prepare Pairs: (Query, POI Description/Text)
+            # Use the constructed 'query' from step 1
+            # Use the 'Description' column we made in load_data, or construct on fly
+            poi_texts = top_candidates['Description'].tolist()
+            pairs = [[query, text] for text in poi_texts]
+            
+            # 3. Predict Scores
+            cross_scores = self.cross_encoder.predict(pairs)
+            
+            # 4. Assign new scores
+            top_candidates['Cross_Encoder_Score'] = cross_scores
+            
+            # 5. Sort by Cross-Encoder Score
+            # Use this as the final semantic score
+            top_candidates['Semantic_Score'] = top_candidates['Cross_Encoder_Score']
+            
+            # Return re-ranked
+            return top_candidates.sort_values(by='Semantic_Score', ascending=False).head(top_k)
+        
+        return top_candidates # Fallback if empty
+
+    # --- CLI / LEGACY METHODS ---
     def search_candidates(self):
         if self.preferences.get('free_text_input'):
             print(f"\nSemantic Searching for: '{self.preferences['free_text_input']}'...")
