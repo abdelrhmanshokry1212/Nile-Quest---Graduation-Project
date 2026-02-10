@@ -95,13 +95,18 @@ class DataLoader:
 
             # Parse Cost
             cost = pd.to_numeric(row.get('Cost'), errors='coerce') or 0.0
+            
+            # FORCE FOOD COST TO 0 (User Request: Variable cost, so assume 0 for planning)
+            category = str(row.get('Category', 'General'))
+            if category.lower() == 'food':
+                cost = 0.0
 
             poi = POI(
                 id=idx,
                 name=str(row.get('Name', 'Unknown')),
                 lat=lat,
                 lon=lon,
-                category=str(row.get('Category', 'General')),
+                category=category,
                 subcategory=str(row.get('Sub-category', '')),
                 duration_hours=duration,
                 cost=cost,
@@ -469,20 +474,68 @@ class Scheduler:
             
         return final_itinerary
 
+from .ai_candidate_generator import AICandidateGenerator
+
 class TouristRecommendationSystem:
     def __init__(self, excel_file: str):
         self.loader = DataLoader(excel_file)
         self.loader.load_data()
-        self.candidate_gen = CandidateGenerator(self.loader.pois)
+        
+        # Initialize AI Generator
+        try:
+            self.ai_gen = AICandidateGenerator(excel_file)
+            self.use_ai = True
+        except Exception as e:
+            print(f"Warning: Could not initialize AI model ({e}). Falling back to basic filter.")
+            self.use_ai = False
+            
+        self.candidate_gen = CandidateGenerator(self.loader.pois) # Keep as fallback
         self.ranker = POIRanker()
         self.optimizer = ItineraryOptimizer()
         self.scheduler = Scheduler()
 
     def generate_itinerary(self, user: UserProfile):
-        print("1. Filtering Candidates...")
-        candidates = self.candidate_gen.filter_candidates(user)
+        candidates = []
         
+        if self.use_ai:
+            print("1. AI Filtering Candidates (Semantic Search)...")
+            try:
+                # 1. Get Top Candidates from AI
+                ai_results = self.ai_gen.generate_candidates_for_user(user, top_k=100)
+                
+                # 2. Map back to POI objects using ID (Index)
+                # Create a quick lookup map
+                poi_map = {p.id: p for p in self.loader.pois}
+                
+                for idx, row in ai_results.iterrows():
+                    if idx in poi_map:
+                        poi = poi_map[idx]
+                        # Inject AI Score
+                        # Scale 0-1 to useful score, e.g. 0-10 base
+                        poi.score = row.get('Semantic_Score', 0) * 100.0 
+                        candidates.append(poi)
+                        
+                print(f"AI returned {len(candidates)} valid candidates.")
+                
+            except Exception as e:
+                print(f"AI Generation failed: {e}. Using basic filter.")
+                candidates = self.candidate_gen.filter_candidates(user)
+        else:
+            print("1. Basic Filtering Candidates...")
+            candidates = self.candidate_gen.filter_candidates(user)
+        
+        # Fallback if AI found nothing (e.g. constraints too strict)
+        if not candidates:
+             print("AI found no matches, retrying with basic loose filter...")
+             candidates = self.candidate_gen.filter_candidates(user)
+
         print("2. Ranking...")
+        # We can still run the ranker to apply specific heuristics (like 'History' keyword bonus)
+        # or just rely on the AI score. Let's start with a fresh rank to be safe, 
+        # but maybe we should preserve the AI score as a base?
+        # The Ranker currently overwrites poi.score. 
+        # Let's modify the Ranker usage or trust the Ranker to do a good job on the Reduced set.
+        # Actually, let's just let the Ranker refine the AI's selection.
         ranked = self.ranker.rank_pois(candidates, user)
         
         print("3. Optimization...")
@@ -496,7 +549,7 @@ class TouristRecommendationSystem:
 if __name__ == "__main__":
     # Test Run
     print("Initializing System...")
-    sys = TouristRecommendationSystem("Cairo_Giza_1000_Real_POIs.xlsx")
+    sys = TouristRecommendationSystem("Cairo_Giza_Final_Verified_POIs.xlsx")
     
     # Define a test user: 3 days, likes History & Nature
     user = UserProfile(

@@ -1,4 +1,0 @@
-['Name', 'Latitude / Longitude', 'Category', 'Sub-category', 'Estimated visit duration', 'Entry cost (EGP)', 'Opening hours', 'Indoor / outdoor']
-
-Categories:
-['History & Culture', 'Shopping', 'Religious', 'Nature & Landscapes', 'Entertainment', 'Food & Cafes', 'Architecture', 'Nightlife', 'Education', 'Historic', 'Tourism', 'Food', 'Services', 'Leisure', 'Business', 'Public']

@@ -1,12 +1,12 @@
 
-from tourist_recommendation_system import TouristRecommendationSystem, UserProfile
+from recommendation_model.tourist_recommendation_system import TouristRecommendationSystem, UserProfile
 
 def main():
     print("=== AI Tourist Recommendation System ===")
     
     # 1. Initialize System
     try:
-        sys = TouristRecommendationSystem("Cairo_Giza_1000_Real_POIs.xlsx")
+        sys = TouristRecommendationSystem("Cairo_Giza_Final_Verified_POIs.xlsx")
     except Exception as e:
         print(f"Failed to initialize: {e}")
         return
@@ -34,25 +34,53 @@ def main():
             print("Invalid amount. Please enter a number.")
 
     # Interests
-    print("\nSelect your interests (enter weights 0.0 to 1.0, or press Enter to skip)")
+    print("\nSelect your top interests BY PRIORITY (1st is most important).")
     available_interests = ["History", "Culture", "Food", "Nature", "Shopping", "Entertainment", "Religious"]
+    
+    print("Available options:")
+    for i, opt in enumerate(available_interests, 1):
+        print(f" {i}. {opt}")
+        
     user_interests = {}
     
-    print("Example: Enter '0.9' for high interest, '0.5' for medium.")
-    for interest in available_interests:
-        val = input(f" - {interest}: ").strip()
-        if val:
-            try:
-                weight = float(val)
-                if weight > 0:
-                    user_interests[interest] = weight
-            except ValueError:
-                pass
+    # Dynamic Priority Input Loop
+    print("\nSelect your top interests BY PRIORITY.")
+    print("1st choice is most important, 2nd is next, etc.")
+    print("Press Enter without typing to finish.")
     
-    # Custom interest
-    custom = input("Any other specific interest? (e.g. 'Pharaonic'): ").strip()
+    current_priority = 1
+    max_weight = 1.0
+    
+    while True:
+        prompt = f"\n{current_priority}. What is your next interest? "
+        if current_priority == 1:
+            prompt = "\n1. What is your MAIN interest? "
+            
+        choice = input(prompt + "(Enter name): ").strip().title()
+        
+        if not choice:
+            if current_priority == 1:
+                 print("   Please enter at least one interest.")
+                 continue
+            else:
+                 break # User finished
+                 
+        if choice in available_interests:
+            if choice not in user_interests:
+                # Assign weight: 1.0, 0.9, 0.8 ... min 0.1
+                weight = max(0.1, max_weight - (current_priority - 1) * 0.1)
+                user_interests[choice] = weight
+                current_priority += 1
+            else:
+                print(f"   '{choice}' is already selected.")
+        else:
+            print(f"   Please choose from the list above: {', '.join(available_interests)}")
+
+    # Custom interest (Added as the next priority)
+    custom = input("\nAny specific topic not listed? (e.g. 'Pharaonic'): ").strip()
     if custom:
-        user_interests[custom] = 1.0
+        weight = max(0.1, max_weight - (current_priority - 1) * 0.1)
+        user_interests[custom] = weight # Add to the tail of priorities
 
     if not user_interests:
         print("No specific interests provided. We will recommend popular attractions.")
