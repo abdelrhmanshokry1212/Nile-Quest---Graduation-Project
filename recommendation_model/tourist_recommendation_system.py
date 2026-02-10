@@ -16,9 +16,10 @@ class UserProfile:
     """
     interests: Dict[str, float] = field(default_factory=dict)  # {"History": 0.8, "Food": 0.5}
     budget_daily: float = 1000.0
+    budget_tier: str = "moderate" # "budget", "moderate", "luxury"
     budget_total: float = 5000.0 # Optional global limit
     duration_days: int = 1
-    pace: str = "relaxed" # "relaxed", "moderate", "fast"
+    pace: str = "moderate" # "relaxed", "moderate", "packed"
     start_time: str = "09:00"
     end_time: str = "17:00"
     geo_center: Optional[Tuple[float, float]] = None # (lat, lon)
@@ -27,8 +28,26 @@ class UserProfile:
     indoor_preference: str = "neutral" # "indoor", "outdoor", "neutral"
 
     def __post_init__(self):
-        # Normalize interests to 0-1 range if needed, or just keep as weights
-        pass
+        # Map budget_tier to budget_daily if not explicitly overridden by a custom value
+        # (Assuming the default 1000.0 is a placeholder, or we just overwrite it based on tier)
+        # To be safe, let's enforce tier Logic if it seems like a default.
+        
+        tier_map = {
+            "budget": 1500.0,
+            "moderate": 3500.0,
+            "luxury": 10000.0
+        }
+        
+        # If budget_daily is the default 1000.0, update it based on tier
+        if self.budget_daily == 1000.0 and self.budget_tier.lower() in tier_map:
+            self.budget_daily = tier_map[self.budget_tier.lower()]
+            
+        # Update total budget estimate
+        if self.budget_total == 5000.0:
+             self.budget_total = self.budget_daily * self.duration_days * 1.5
+
+        # Normalize pace
+        self.pace = self.pace.lower()
 
 @dataclass
 class POI:
@@ -212,20 +231,30 @@ class POIRanker:
                      score += 1.0
 
             # 2. Cost Suitability (Smart Budget Logic)
-            # If budget is tight, favor cheap. If budget is lux, favor expensive.
-            if user.budget_daily < 500:
-                if poi.cost < 100: score += 1.0
-                elif poi.cost > 300: score -= 1.0
-            elif user.budget_daily > 2000:
-                # User has money, show them premium options
+            if user.budget_tier == "budget":
+                if poi.cost < 100: score += 2.0
+                elif poi.cost > 300: score -= 2.0
+            elif user.budget_tier == "luxury":
                 if poi.cost > 500: score += 2.0
-                if poi.cost < 50: score -= 0.5 # Slightly de-rank very cheap filler items if rich
+                if poi.cost < 50: score -= 0.5
+            else: # moderate
+                 if 50 <= poi.cost <= 500: score += 1.0
 
-            # 3. Duration Suitability (penalize very long tasks if pace is fast)
-            # Removed explicit pace input, default logic applies if needed, or remove completely
-            # Let's keep a soft constraint: generally prefer 1-3 hour activities
-            if poi.duration_hours > 4:
-                score -= 1.0
+            # 3. Duration Suitability based on Pace
+            # "Relaxed": Penalize short/quick items to avoid rushing? Or penalize too many items?
+            # Actually, for "Relaxed", we want FEWER items, so maybe we prefer longer, meaningful visits?
+            # For "Packed", we want MANY items, so short duration is fine.
+            
+            if user.pace == "relaxed":
+                # Prefer longer, deeper experiences
+                if poi.duration_hours > 2.0: score += 1.0
+                # Penalize quick stops slightly?
+                if poi.duration_hours < 1.0: score -= 0.5
+                
+            elif user.pace == "packed":
+                # Prefer shorter, quick hits
+                if poi.duration_hours < 2.0: score += 1.0
+                if poi.duration_hours > 4.0: score -= 1.0
             
             poi.score = score
 
@@ -282,8 +311,18 @@ class ItineraryOptimizer:
             # Track categories used TODAY for diversity
             day_category_counts = {}
 
-            # While we have time in the day
-            while current_time < end_h_float:
+            # Determine max items based on pace
+            if user.pace == "relaxed":
+                max_items = 2
+            elif user.pace == "moderate":
+                max_items = 4 # "Balanced like 3" - giving a bit of flex, or set to 3. Let's say 4 to allow small items.
+                              # User said "Moderate to be balanced like 3". Let's stick to 3-4.
+                max_items = 3 
+            else: # packed
+                max_items = 99
+
+            # While we have time in the day AND space in the schedule
+            while current_time < end_h_float and len(day_pois) < max_items:
                 best_candidate = None
                 best_effective_score = -float('inf')
 

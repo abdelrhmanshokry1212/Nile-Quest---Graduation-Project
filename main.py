@@ -25,17 +25,25 @@ def main():
             print("Invalid number.")
 
     # Budget
+    print("\nSelect your Budget Tier:")
+    budget_options = ["Budget", "Moderate", "Luxury"]
+    for i, opt in enumerate(budget_options, 1):
+        print(f"{i}. {opt}")
+        
+    budget_tier = "moderate"
     while True:
         try:
-            budget_input = input("What is your DAILY budget in EGP? (e.g., 1000): ").strip()
-            budget_daily = float(budget_input) if budget_input else 1000.0
-            break
+            choice = int(input("Select option (1-3): ").strip())
+            if 1 <= choice <= 3:
+                budget_tier = budget_options[choice-1].lower()
+                break
+            print("Invalid choice.")
         except ValueError:
-            print("Invalid amount. Please enter a number.")
+            print("Please enter a number.")
 
     # Interests
     print("\nSelect your top interests BY PRIORITY (1st is most important).")
-    available_interests = ["History", "Culture", "Food", "Nature", "Shopping", "Entertainment", "Religious"]
+    available_interests = ["History", "Food", "Nature", "Shopping", "Entertainment", "Religious"]
     
     print("Available options:")
     for i, opt in enumerate(available_interests, 1):
@@ -85,14 +93,28 @@ def main():
     if not user_interests:
         print("No specific interests provided. We will recommend popular attractions.")
     
-    # Pace (Removed as per feedback, defaulting to moderate/dynamic)
-    pace = "moderate" 
+    # Pace
+    print("\nSelect your Travel Pace:")
+    pace_options = ["Relaxed", "Moderate", "Packed"]
+    for i, opt in enumerate(pace_options, 1):
+        print(f"{i}. {opt}")
+        
+    pace = "moderate"
+    while True:
+        try:
+            choice = int(input("Select option (1-3): ").strip())
+            if 1 <= choice <= 3:
+                pace = pace_options[choice-1].lower()
+                break
+            print("Invalid choice.")
+        except ValueError:
+             print("Please enter a number.")
 
     
     user = UserProfile(
         interests=user_interests,
-        budget_daily=budget_daily,
-        budget_total=budget_daily * days * 1.5, # Estimate buffer
+        budget_tier=budget_tier,
+        # budget_daily and budget_total will be estimated in __post_init__ based on tier
         duration_days=days,
         pace=pace,
         start_time="09:00",
@@ -103,8 +125,9 @@ def main():
 
     print(f"\nUser Profile:")
     print(f"- Interests: {', '.join([f'{k}({v})' for k,v in user.interests.items()])}")
-    print(f"- Budget: {user.budget_daily} EGP/day")
+    print(f"- Budget Tier: {user.budget_tier} (Est. {user.budget_daily} EGP/day)")
     print(f"- Duration: {user.duration_days} days")
+    print(f"- Pace: {user.pace}")
     
     # 3. Generate Itinerary
     print("\nGenerating Itinerary...")

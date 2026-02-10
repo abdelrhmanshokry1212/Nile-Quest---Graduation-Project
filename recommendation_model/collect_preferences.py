@@ -46,9 +46,9 @@ class UserPreferenceCollector:
         # 2. Travel Style & Pace (Page 2, 4)
         print("\n--- Step 2: Travel Style & Pace ---")
         pace = self.ask_choice("What is your preferred travel pace?", [
-            "Relaxed (1-2 major sites/day, plenty of breaks)", 
-            "Balanced (2-3 sites/day, moderate pace)", 
-            "Fast-paced (See as much as possible, active)"
+            "Relaxed", 
+            "Moderate", 
+            "Packed"
         ])
         self.preferences["travel_style"]["pace"] = pace
         
@@ -63,7 +63,7 @@ class UserPreferenceCollector:
         # 3. Interests (Page 3)
         print("\n--- Step 3: Interests & Motivations ---")
         print("Please rate your interest in the following categories:")
-        interests = ["History & Culture", "Food & Dining", "Nature & Landscapes", "Shopping", "Art & Museums", "Adventure/Sports"]
+        interests = ["History", "Food", "Nature", "Shopping", "Entertainment", "Religious"]
         for cat in interests:
             val = self.ask_rating(cat)
             self.preferences["interests"][cat] = val
@@ -71,9 +71,9 @@ class UserPreferenceCollector:
         # 4. Budget (Page 4)
         print("\n--- Step 4: Budget ---")
         budget_level = self.ask_choice("What is your budget comfort level?", [
-            "Budget-conscious",
-            "Standard / Mid-range",
-            "Luxury / High-end"
+            "Budget",
+            "Moderate",
+            "Luxury"
         ])
         self.preferences["budget"]["level"] = budget_level
         self.preferences["budget"]["priority"] = self.ask_choice("What would you splurge on?", ["Accommodation", "Food", "Experiences", "None"])
